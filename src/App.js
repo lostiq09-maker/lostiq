@@ -106,11 +106,6 @@ export default function App() {
   const [profileSaveLoading, setProfileSaveLoading] = useState(false);
   const [profileSaveSuccess, setProfileSaveSuccess] = useState(false);
 
-  // Profile Password Change State
-  const [adminNewPassword, setAdminNewPassword] = useState('');
-  const [adminPasswordLoading, setAdminPasswordLoading] = useState(false);
-  const [adminPasswordMsg, setAdminPasswordMsg] = useState({ type: '', text: '' });
-
   // Login Form States
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
@@ -899,27 +894,6 @@ export default function App() {
       // Profile save error handled
     } finally {
       setProfileSaveLoading(false);
-    }
-  };
-
-  const handleUpdateSelfPassword = async (e) => {
-    e.preventDefault();
-    if (!currentUser || !adminNewPassword) return;
-    setAdminPasswordLoading(true);
-    setAdminPasswordMsg({ type: '', text: '' });
-    try {
-      await updatePassword(currentUser, adminNewPassword);
-      await update(ref(database, `users/${currentUser.uid}`), {
-        assignedPassword: adminNewPassword,
-        password: adminNewPassword
-      });
-      setAdminPasswordMsg({ type: 'success', text: 'Password updated successfully!' });
-      setAdminNewPassword('');
-      setTimeout(() => setAdminPasswordMsg({ type: '', text: '' }), 3000);
-    } catch (err) {
-      setAdminPasswordMsg({ type: 'error', text: err.message || 'Error updating password' });
-    } finally {
-      setAdminPasswordLoading(false);
     }
   };
 
@@ -3151,66 +3125,6 @@ export default function App() {
                         </button>
                       </div>
                     </form>
-
-                    <div className="mt-8 pt-6 border-t border-slate-100">
-                      <h4 className="text-xs font-bold text-emerald-800 uppercase tracking-wider mb-4 flex items-center gap-1.5">
-                        <Lock size={14} />
-                        Security &amp; Password
-                      </h4>
-
-                      {adminPasswordMsg.text && (
-                        <div
-                          className={`p-3 rounded-xl text-xs mb-4 flex items-center gap-2 ${
-                            adminPasswordMsg.type === 'success'
-                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                              : 'bg-rose-50 text-rose-600 border border-rose-200'
-                          }`}
-                        >
-                          {adminPasswordMsg.type === 'success' ? <CheckCircle2 size={15} /> : <AlertCircle size={15} />}
-                          <span>{adminPasswordMsg.text}</span>
-                        </div>
-                      )}
-
-                      <form onSubmit={handleUpdateSelfPassword} className="space-y-4 text-xs">
-                        <div className="max-w-md">
-                          <label className="block font-semibold text-slate-700 mb-1">Update Account Password</label>
-                          <div className="relative">
-                            <Key size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                            <input
-                              type="text"
-                              placeholder="Enter new password (min. 6 characters)"
-                              value={adminNewPassword}
-                              onChange={(e) => setAdminNewPassword(e.target.value)}
-                              required
-                              className="w-full pl-10 pr-4 py-2.5 bg-slate-50/50 border border-slate-300 rounded-xl text-xs font-mono text-slate-800 focus:bg-white focus:outline-none focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600 transition"
-                            />
-                          </div>
-                          <p className="text-[11px] text-slate-400 mt-1">
-                            Updating your password saves it to your account in Firebase.
-                          </p>
-                        </div>
-
-                        <div>
-                          <button
-                            type="submit"
-                            disabled={adminPasswordLoading || !adminNewPassword}
-                            className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-xl shadow-md transition disabled:opacity-50 flex items-center gap-1.5"
-                          >
-                            {adminPasswordLoading ? (
-                              <>
-                                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                <span>Updating Password...</span>
-                              </>
-                            ) : (
-                              <>
-                                <Key size={14} />
-                                <span>Update Password</span>
-                              </>
-                            )}
-                          </button>
-                        </div>
-                      </form>
-                    </div>
                   </div>
                 </>
               )}
@@ -3222,7 +3136,7 @@ export default function App() {
             <div className="max-w-4xl mx-auto space-y-6">
               <div>
                 <h2 className="text-xl font-bold text-slate-900">Help &amp; Support Hotline</h2>
-                <p className="text-xs text-slate-500">Direct technical contacts and troubleshooting guide</p>
+                <p className="text-xs text-slate-500">Direct technical contacts and support assistance</p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -3231,9 +3145,9 @@ export default function App() {
                     <Phone size={20} />
                   </div>
                   <div>
-                    <h3 className="text-xs font-bold text-slate-900">Hotel IT Desk Extension</h3>
-                    <p className="text-sm font-extrabold text-emerald-700 mt-1">+60 9-565 9999 (Ext 104)</p>
-                    <p className="text-[11px] text-slate-400 mt-0.5">24/7 internal hotel support desk</p>
+                    <h3 className="text-xs font-bold text-slate-900">Support Hotline</h3>
+                    <p className="text-sm font-extrabold text-emerald-700 mt-1">+60 11-6103 7798</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">Direct phone assistance</p>
                   </div>
                 </div>
 
@@ -3243,18 +3157,9 @@ export default function App() {
                   </div>
                   <div>
                     <h3 className="text-xs font-bold text-slate-900">Official System Support</h3>
-                    <p className="text-sm font-extrabold text-blue-700 mt-1">support@lostiq.com.my</p>
-                    <p className="text-[11px] text-slate-400 mt-0.5">Escalated hardware and firmware support</p>
+                    <p className="text-sm font-extrabold text-blue-700 mt-1">LostIQ09@gmail.com</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">Customer &amp; technical inquiries</p>
                   </div>
-                </div>
-              </div>
-
-              <div className="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-sm">
-                <h3 className="text-sm font-bold text-slate-900 mb-3">Hardware Quick Troubleshooting</h3>
-                <div className="space-y-3 text-xs text-slate-600">
-                  <p><strong>• Card scan not detected:</strong> Ensure the RFID card or key fob is tapped within 2cm of the RC522 reader terminal.</p>
-                  <p><strong>• Wi-Fi reconnecting:</strong> Check that your ESP32 router hotspot is powered on and matches credentials (<code className="bg-slate-100 px-1 py-0.5 rounded text-emerald-700">rfid / rfid1234</code>).</p>
-                  <p><strong>• Guest Return:</strong> When a guest arrives to claim an item, click "Return" in the All Items table to update the custody status.</p>
                 </div>
               </div>
             </div>
