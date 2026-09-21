@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { initializeApp, getApps, getApp } from 'firebase/app';
+import { initializeApp, getApps, getApp, deleteApp } from 'firebase/app';
 import { 
   getAuth, 
   signInWithEmailAndPassword, 
@@ -696,7 +696,6 @@ export default function App() {
       const newItemRef = ref(database, `items/${tagToSave}`);
       await set(newItemRef, newItemPayload);
 
-      // Log to scan_history
       const logRef = ref(database, `scan_history/reg-${Date.now()}`);
       await set(logRef, {
         uid: tagToSave,
@@ -706,7 +705,6 @@ export default function App() {
         device: 'Web Portal'
       });
 
-      // Reset form
       setFormData({
         name: '',
         category: 'Wallet',
@@ -812,13 +810,25 @@ export default function App() {
     setTimeout(() => setCopiedUserId(null), 2000);
   };
 
+  // Uses a secondary isolated Firebase App so Admin session isn't replaced upon user creation
   const handleCreateStaffAccount = async (e) => {
     e.preventDefault();
     setAddUserError('');
     setAddUserLoading(true);
+
+    let secondaryApp = null;
     try {
-      const userCred = await createUserWithEmailAndPassword(auth, newUserForm.email, newUserForm.password);
+      const secondaryAppName = `secondaryApp_${Date.now()}`;
+      secondaryApp = initializeApp(firebaseConfig, secondaryAppName);
+      const secondaryAuth = getAuth(secondaryApp);
+
+      const userCred = await createUserWithEmailAndPassword(
+        secondaryAuth,
+        newUserForm.email,
+        newUserForm.password
+      );
       const newUid = userCred.user.uid;
+
       await set(ref(database, `users/${newUid}`), {
         id: newUid,
         name: newUserForm.name,
@@ -829,6 +839,8 @@ export default function App() {
         assignedPassword: newUserForm.password,
         createdAt: new Date().toISOString()
       });
+
+      await signOut(secondaryAuth);
       setIsAddUserModalOpen(false);
       setNewUserForm({
         name: '',
@@ -841,6 +853,13 @@ export default function App() {
     } catch (err) {
       setAddUserError(err.message || 'Failed to create staff account');
     } finally {
+      if (secondaryApp) {
+        try {
+          await deleteApp(secondaryApp);
+        } catch (delErr) {
+          // Cleanup suppression
+        }
+      }
       setAddUserLoading(false);
     }
   };
@@ -978,8 +997,7 @@ export default function App() {
             <h1 className="text-2xl font-bold tracking-tight text-white flex items-center">
               <span>LOST</span><span className="text-emerald-400 font-extrabold">IQ</span>
             </h1>
-            <p className="text-xs text-slate-400 mt-1">Smart Lost & Found Management System</p>
-            {/* <p className="text-[11px] text-emerald-400/80 font-medium mt-0.5">Zenith Hotel Kuantan</p> */}
+            <p className="text-xs text-slate-400 mt-1">Smart Lost &amp; Found Management System</p>
           </div>
 
           {loginError && (
@@ -2823,22 +2841,6 @@ export default function App() {
                     </div>
 
                     <div className="flex items-center gap-2">
-                      {staffUsers.length > 0 && (
-                        <button
-                          onClick={async () => {
-                            try {
-                              await remove(ref(database, 'users'));
-                            } catch (err) {
-                              // Pass
-                            }
-                          }}
-                          className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-xl text-xs font-bold transition flex items-center gap-1.5"
-                          title="Remove all existing staff to re-assign clean"
-                        >
-                          <Trash2 size={14} />
-                          <span>Clear All Staff</span>
-                        </button>
-                      )}
                       <button
                         onClick={() => setIsAddUserModalOpen(true)}
                         className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-md transition flex items-center gap-1.5"
@@ -3459,7 +3461,7 @@ export default function App() {
 
                       setNewUserForm({ 
                         ...newUserForm, 
-                        role: selectedRole,
+                        role: selectedRole, 
                         department: suggestedDept
                       });
                     }}
