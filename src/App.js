@@ -192,7 +192,15 @@ export default function App() {
   const [visiblePasswords, setVisiblePasswords] = useState({});
   const [showAllPasswords, setShowAllPasswords] = useState(false);
   const [copiedUserId, setCopiedUserId] = useState(null);
-  const [showEmptyConfirm, setShowEmptyConfirm] = useState(false);
+
+  // Yes/No Double Confirmation Dialog State
+  const [confirmModal, setConfirmModal] = useState({
+    isOpen: false,
+    title: '',
+    description: '',
+    actionType: null,
+    targetId: null
+  });
 
   // File input ref for photo upload
   const fileInputRef = useRef(null);
@@ -274,7 +282,6 @@ export default function App() {
   useEffect(() => {
     if (!currentUser) return;
 
-    // 1. Listen to items inventory
     const itemsRef = ref(database, 'items');
     const unsubscribeItems = onValue(itemsRef, (snapshot) => {
       if (snapshot.exists()) {
@@ -289,7 +296,6 @@ export default function App() {
       }
     });
 
-    // 2. Listen to registered staff users
     const staffRef = ref(database, 'users');
     const unsubscribeUsers = onValue(staffRef, (snapshot) => {
       if (snapshot.exists()) {
@@ -304,7 +310,6 @@ export default function App() {
       }
     });
 
-    // 3. Listen to latest RFID scan from ESP32
     const scanRef = ref(database, 'current_scan');
     const unsubscribeScan = onValue(scanRef, (snapshot) => {
       if (snapshot.exists()) {
@@ -315,7 +320,6 @@ export default function App() {
       }
     });
 
-    // 4. Listen to scan_history logs from ESP32 & System
     const historyRef = ref(database, 'scan_history');
     const unsubscribeHistory = onValue(historyRef, (snapshot) => {
       if (snapshot.exists()) {
@@ -330,7 +334,6 @@ export default function App() {
       }
     });
 
-    // 5. REST Polling fallback for ESP32 real-time triggers
     const pollInterval = setInterval(async () => {
       try {
         const res = await fetch(`${RTDB_URL}/current_scan.json`);
@@ -346,7 +349,7 @@ export default function App() {
           }
         }
       } catch (err) {
-        // Fallback polling network error handled gracefully
+        // Fallback polling error
       }
     }, 2000);
 
@@ -376,7 +379,7 @@ export default function App() {
       osc.start();
       osc.stop(ctx.currentTime + 0.35);
     } catch (e) {
-      // Audio context policy suppression handled
+      // Audio context policy suppression
     }
   }, []);
 
@@ -624,7 +627,7 @@ export default function App() {
     try {
       await signOut(auth);
     } catch (err) {
-      // Sign out error handling
+      // Sign out error
     }
   };
 
@@ -725,7 +728,7 @@ export default function App() {
 
       setActiveTab('all-items');
     } catch (err) {
-      // Database write error handled
+      // Error handling
     }
   };
 
@@ -751,24 +754,93 @@ export default function App() {
         });
       }
     } catch (err) {
-      // Status update error handled
+      // Error handling
     }
   };
 
-  const handleDeleteItem = async (itemId) => {
-    try {
-      await remove(ref(database, `items/${itemId}`));
-    } catch (err) {
-      // Deletion error handled
+  // Open the Yes/No Confirmation Dialog
+  const openConfirmModal = (actionType, targetId = null) => {
+    let title = '';
+    let description = '';
+
+    if (actionType === 'EMPTY_ITEMS') {
+      title = 'Empty All Items?';
+      description = `Are you sure you want to permanently delete all ${items.length} registered items? This action cannot be undone.`;
+    } else if (actionType === 'CLEAR_HISTORY') {
+      title = 'Clear Activity Log?';
+      description = 'Are you sure you want to permanently wipe all recorded RFID scan logs?';
+    } else if (actionType === 'DELETE_SINGLE_ITEM') {
+      title = 'Delete Item?';
+      description = 'Are you sure you want to permanently delete this item from the inventory?';
+    } else if (actionType === 'DELETE_STAFF') {
+      title = 'Delete Staff Account?';
+      description = 'Are you sure you want to permanently delete this staff user from both Firebase Authentication and the database?';
     }
+
+    setConfirmModal({
+      isOpen: true,
+      title,
+      description,
+      actionType,
+      targetId
+    });
   };
 
-  const handleEmptyAllItems = async () => {
+  // Execute action upon clicking "Yes"
+  const handleExecuteConfirmedAction = async () => {
     try {
-      await remove(ref(database, 'items'));
-      setShowEmptyConfirm(false);
+      if (confirmModal.actionType === 'EMPTY_ITEMS') {
+        await remove(ref(database, 'items'));
+      } else if (confirmModal.actionType === 'CLEAR_HISTORY') {
+        await remove(ref(database, 'scan_history'));
+      } else if (confirmModal.actionType === 'DELETE_SINGLE_ITEM' && confirmModal.targetId) {
+        await remove(ref(database, `items/${confirmModal.targetId}`));
+      } else if (confirmModal.actionType === 'DELETE_STAFF' && confirmModal.targetId) {
+        const targetUserId = confirmModal.targetId;
+        const targetUser = staffUsers.find((u) => u.id === targetUserId);
+        const userPassword = targetUser?.assignedPassword || targetUser?.password;
+
+        // Automatically delete from Firebase Authentication via isolated secondary app
+        if (targetUser?.email && userPassword) {
+          let secondaryApp = null;
+          try {
+            const secondaryAppName = `deleteStaffApp_${Date.now()}`;
+            secondaryApp = initializeApp(firebaseConfig, secondaryAppName);
+            const secondaryAuth = getAuth(secondaryApp);
+
+            const staffCred = await signInWithEmailAndPassword(
+              secondaryAuth,
+              targetUser.email,
+              userPassword
+            );
+
+            await staffCred.user.delete();
+          } catch (authErr) {
+            // Auth delete fallback
+          } finally {
+            if (secondaryApp) {
+              try {
+                await deleteApp(secondaryApp);
+              } catch (delErr) {
+                // Ignore cleanup error
+              }
+            }
+          }
+        }
+
+        // Delete user from Realtime Database
+        await remove(ref(database, `users/${targetUserId}`));
+      }
     } catch (err) {
-      // Empty items error handled
+      // Execution error handled
+    } finally {
+      setConfirmModal({
+        isOpen: false,
+        title: '',
+        description: '',
+        actionType: null,
+        targetId: null
+      });
     }
   };
 
@@ -792,7 +864,7 @@ export default function App() {
       setIsEditModalOpen(false);
       setEditingItem(null);
     } catch (err) {
-      // Edit item error handled
+      // Error handling
     }
   };
 
@@ -810,7 +882,6 @@ export default function App() {
     setTimeout(() => setCopiedUserId(null), 2000);
   };
 
-  // Uses a secondary isolated Firebase App so Admin session isn't replaced upon user creation
   const handleCreateStaffAccount = async (e) => {
     e.preventDefault();
     setAddUserError('');
@@ -910,7 +981,7 @@ export default function App() {
       setProfileSaveSuccess(true);
       setTimeout(() => setProfileSaveSuccess(false), 3000);
     } catch (err) {
-      // Profile save error handled
+      // Error handling
     } finally {
       setProfileSaveLoading(false);
     }
@@ -964,14 +1035,6 @@ export default function App() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  };
-
-  const handleClearScanHistory = async () => {
-    try {
-      await remove(ref(database, 'scan_history'));
-    } catch (err) {
-      // Clear scan history error handled
-    }
   };
 
   if (authLoading) {
@@ -2101,8 +2164,8 @@ export default function App() {
                 <div className="flex items-center gap-3">
                   {isAdmin && items.length > 0 && (
                     <button
-                      onClick={() => setShowEmptyConfirm(true)}
-                      className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-xl text-xs font-bold transition flex items-center gap-1.5"
+                      onClick={() => openConfirmModal('EMPTY_ITEMS')}
+                      className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
                     >
                       <Trash2 size={14} />
                       <span>Empty All Items</span>
@@ -2307,7 +2370,7 @@ export default function App() {
                                   )}
 
                                   <button
-                                    onClick={() => handleDeleteItem(item.id)}
+                                    onClick={() => openConfirmModal('DELETE_SINGLE_ITEM', item.id)}
                                     className="p-1 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition"
                                     title="Delete item"
                                   >
@@ -2341,8 +2404,8 @@ export default function App() {
                 <div className="flex items-center gap-3">
                   {isAdmin && scanHistory.length > 0 && (
                     <button
-                      onClick={handleClearScanHistory}
-                      className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-xl text-xs font-bold transition flex items-center gap-1.5"
+                      onClick={() => openConfirmModal('CLEAR_HISTORY')}
+                      className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
                     >
                       <Trash2 size={14} />
                       <span>Clear Log</span>
@@ -2961,13 +3024,7 @@ export default function App() {
                                     {user.email !== currentUser?.email && (
                                       <button
                                         type="button"
-                                        onClick={async () => {
-                                          try {
-                                            await remove(ref(database, `users/${user.id}`));
-                                          } catch (err) {
-                                            // pass
-                                          }
-                                        }}
+                                        onClick={() => openConfirmModal('DELETE_STAFF', user.id)}
                                         className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
                                         title="Delete Staff"
                                       >
@@ -3591,30 +3648,32 @@ export default function App() {
         </div>
       )}
 
-      {/* Empty Items Confirm Dialog */}
-      {showEmptyConfirm && (
+      {/* Yes/No Double Confirmation Dialog */}
+      {confirmModal.isOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 text-center">
-            <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto mb-3">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 text-center animate-in fade-in zoom-in-95 duration-150">
+            <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto mb-3 shadow-inner">
               <Trash2 size={24} />
             </div>
-            <h3 className="text-base font-bold text-slate-900">Empty All Items?</h3>
-            <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-              This action will permanently remove all {items.length} registered items from your Firebase Realtime Database. This action cannot be undone.
+            <h3 className="text-base font-bold text-slate-900">{confirmModal.title}</h3>
+            <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+              {confirmModal.description}
             </p>
 
-            <div className="flex items-center justify-center gap-2 mt-5">
+            <div className="flex items-center justify-center gap-3 mt-6">
               <button
-                onClick={() => setShowEmptyConfirm(false)}
-                className="px-4 py-2 border border-slate-300 text-slate-600 rounded-xl text-xs font-semibold"
+                type="button"
+                onClick={() => setConfirmModal({ isOpen: false, title: '', description: '', actionType: null, targetId: null })}
+                className="flex-1 py-2.5 px-4 border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-bold transition"
               >
-                Cancel
+                No, Cancel
               </button>
               <button
-                onClick={handleEmptyAllItems}
-                className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-md shadow-rose-900/20"
+                type="button"
+                onClick={handleExecuteConfirmedAction}
+                className="flex-1 py-2.5 px-4 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-md shadow-rose-900/20 transition"
               >
-                Yes, Delete All
+                Yes, Delete
               </button>
             </div>
           </div>
