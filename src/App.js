@@ -14,7 +14,7 @@ import {
   onValue, 
   set, 
   update, 
-  remove 
+  remove
 } from 'firebase/database';
 
 import { 
@@ -979,7 +979,7 @@ export default function App() {
               <span>LOST</span><span className="text-emerald-400 font-extrabold">IQ</span>
             </h1>
             <p className="text-xs text-slate-400 mt-1">Smart Lost & Found Management System</p>
-            <p className="text-[11px] text-emerald-400/80 font-medium mt-0.5">Zenith Hotel Kuantan</p>
+            {/* <p className="text-[11px] text-emerald-400/80 font-medium mt-0.5">Zenith Hotel Kuantan</p> */}
           </div>
 
           {loginError && (
