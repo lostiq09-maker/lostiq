@@ -1428,7 +1428,7 @@ export default function App() {
             </div>
 
             <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 bg-slate-100 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700">
-              <span>Zenith Hotel Kuantan</span>
+              <span>Politeknik Hulu Terengganu</span>
               <ChevronDown size={13} className="text-slate-400" />
             </div>
 
@@ -2770,7 +2770,7 @@ export default function App() {
                           <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between">
                             <div>
                               <p className="font-bold text-slate-800">Hotel Establishment</p>
-                              <p className="text-[11px] text-slate-500">Zenith Hotel Kuantan (Main Branch)</p>
+                              <p className="text-[11px] text-slate-500">Politeknik Hulu Terengganu (Main Branch)</p>
                             </div>
                             <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 font-bold rounded-full text-[10px]">
                               Active
