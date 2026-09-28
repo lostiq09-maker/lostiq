@@ -54,7 +54,9 @@ import {
   ShieldCheck,
   Save,
   Lock,
-  History
+  History,
+  Tag,
+  MapPin
 } from 'lucide-react';
 
 const getEnv = (key, fallback) => {
@@ -127,9 +129,14 @@ export default function App() {
   const [scanSearchTerm, setScanSearchTerm] = useState('');
   const [scanFilterType, setScanFilterType] = useState('ALL');
 
-  // Dedicated Live Scan Trigger States
+  // Dedicated Live Scan Trigger States (Add Item Form)
   const [isAwaitingScan, setIsAwaitingScan] = useState(false);
   const [scanSuccessCue, setScanSuccessCue] = useState(false);
+
+  // Dedicated Live Scanner Tab States (matches your UI layout)
+  const [scannerInputTag, setScannerInputTag] = useState('');
+  const [isScannerAwaiting, setIsScannerAwaiting] = useState(false);
+  const [scannerSuccessCue, setScannerSuccessCue] = useState(false);
 
   // Filtering & Search for Items Tab
   const [searchTerm, setSearchTerm] = useState('');
@@ -139,7 +146,6 @@ export default function App() {
   const [showNotifications, setShowNotifications] = useState(false);
   const [notificationsRead, setNotificationsRead] = useState(false);
 
-  // Dynamic Date & Time helper (24-hour HH:mm)
   const getTodayDateString = () => new Date().toISOString().split('T')[0];
   const getCurrentTimeString = () => {
     const d = new Date();
@@ -193,7 +199,7 @@ export default function App() {
   const [showAllPasswords, setShowAllPasswords] = useState(false);
   const [copiedUserId, setCopiedUserId] = useState(null);
 
-  // Yes/No Double Confirmation Dialog State
+  // Confirmation Dialog State
   const [confirmModal, setConfirmModal] = useState({
     isOpen: false,
     title: '',
@@ -202,7 +208,6 @@ export default function App() {
     targetId: null
   });
 
-  // File input ref for photo upload
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -349,7 +354,7 @@ export default function App() {
           }
         }
       } catch (err) {
-        // Fallback polling error
+        // Polling error
       }
     }, 2000);
 
@@ -364,9 +369,9 @@ export default function App() {
 
   const playScanChime = useCallback(() => {
     try {
-      const AudioContext = window.AudioContext || window.webkitAudioContext;
-      if (!AudioContext) return;
-      const ctx = new AudioContext();
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.connect(gain);
@@ -379,10 +384,11 @@ export default function App() {
       osc.start();
       osc.stop(ctx.currentTime + 0.35);
     } catch (e) {
-      // Audio context policy suppression
+      // Audio suppression
     }
   }, []);
 
+  // Sync scan on Add Item Form
   useEffect(() => {
     if (isAwaitingScan && currentScan?.uid && typeof currentScan.uid === 'string' && currentScan.uid.trim() !== '') {
       const capturedUid = currentScan.uid.trim();
@@ -393,6 +399,20 @@ export default function App() {
       setTimeout(() => setScanSuccessCue(false), 4000);
     }
   }, [currentScan, isAwaitingScan, playScanChime]);
+
+  // Sync scan on Dedicated Live Scanner Tab
+  useEffect(() => {
+    if (currentScan?.uid && typeof currentScan.uid === 'string' && currentScan.uid.trim() !== '') {
+      const capturedUid = currentScan.uid.trim();
+      setScannerInputTag(capturedUid);
+      if (isScannerAwaiting) {
+        setIsScannerAwaiting(false);
+        setScannerSuccessCue(true);
+        playScanChime();
+        setTimeout(() => setScannerSuccessCue(false), 4000);
+      }
+    }
+  }, [currentScan, isScannerAwaiting, playScanChime]);
 
   const handleStartRfidScan = async () => {
     setIsAwaitingScan(true);
@@ -406,6 +426,20 @@ export default function App() {
 
   const handleCancelRfidScan = () => {
     setIsAwaitingScan(false);
+  };
+
+  const handleStartScannerTabScan = async () => {
+    setIsScannerAwaiting(true);
+    setScannerSuccessCue(false);
+    try {
+      await set(ref(database, 'current_scan/uid'), '');
+    } catch (err) {
+      // Pass
+    }
+  };
+
+  const handleCancelScannerTabScan = () => {
+    setIsScannerAwaiting(false);
   };
 
   const isAdmin = useMemo(() => {
@@ -494,82 +528,57 @@ export default function App() {
     const recordsMap = new Map();
 
     scanHistory.forEach((log) => {
-      const tag = (log.uid || log.rfidTag || '').trim();
-      if (!tag) return;
-      const key = `${tag}-${log.timestamp || log.id}`;
-      recordsMap.set(key, {
-        id: log.id || key,
-        rfidTag: tag,
-        timestamp: log.timestamp || log.time || log.createdAt || new Date().toISOString(),
-        eventType: log.eventType || 'HARDWARE_SCAN',
-        deviceName: log.device || 'ESP32 Reader Terminal',
-        status: log.status || 'SCANNED'
-      });
+      const rawTag = (log.uid || log.rfidTag || '').trim();
+      if (!rawTag) return;
+      const cleanTag = rawTag.replace(/\s+/g, '').toUpperCase();
+      const timeBucket = log.timestamp ? Math.floor(new Date(log.timestamp).getTime() / (1000 * 60 * 5)) : log.id;
+      const key = `${cleanTag}-${log.eventType || 'SCAN'}-${timeBucket}`;
+
+      if (!recordsMap.has(key)) {
+        recordsMap.set(key, {
+          id: log.id || key,
+          rfidTag: rawTag,
+          timestamp: log.timestamp || log.time || log.createdAt || new Date().toISOString(),
+          eventType: log.eventType || 'HARDWARE_SCAN',
+          deviceName: log.device || 'ESP32 Reader Terminal',
+          status: log.status || 'SCANNED'
+        });
+      }
     });
 
     if (currentScan?.uid && typeof currentScan.uid === 'string' && currentScan.uid.trim() !== '') {
-      const cleanUid = currentScan.uid.trim();
-      const liveKey = `live-${cleanUid}-${currentScan.timestamp || 'now'}`;
-      recordsMap.set(liveKey, {
-        id: liveKey,
-        rfidTag: cleanUid,
-        timestamp: currentScan.timestamp || new Date().toISOString(),
-        eventType: 'LIVE_HARDWARE_TAP',
-        deviceName: 'ESP32 RC522 Reader',
-        status: currentScan.status || 'DETECTED'
-      });
+      const rawUid = currentScan.uid.trim();
+      const cleanUid = rawUid.replace(/\s+/g, '').toUpperCase();
+      const liveKey = `live-${cleanUid}`;
+
+      if (!recordsMap.has(liveKey)) {
+        recordsMap.set(liveKey, {
+          id: liveKey,
+          rfidTag: rawUid,
+          timestamp: currentScan.timestamp || new Date().toISOString(),
+          eventType: 'LIVE_HARDWARE_TAP',
+          deviceName: 'ESP32 RC522 Reader',
+          status: currentScan.status || 'DETECTED'
+        });
+      }
     }
 
-    items.forEach((item) => {
-      const tag = (item.rfidTag || item.id || '').trim();
-      if (!tag) return;
-
-      const regKey = `reg-${item.id}-${tag}`;
-      if (!recordsMap.has(regKey)) {
-        recordsMap.set(regKey, {
-          id: regKey,
-          rfidTag: tag,
-          timestamp: item.registeredAt || item.createdAt || (item.dateFound ? `${item.dateFound}T${item.timeFound || '00:00'}:00` : new Date().toISOString()),
-          eventType: 'ITEM_REGISTERED',
-          itemName: item.name,
-          category: item.category,
-          location: item.foundLocation,
-          guestName: item.guestName,
-          status: item.status || 'STORED',
-          operator: item.foundBy || 'Staff'
-        });
-      }
-
-      if (item.status === 'RETURNED' || item.returnedAt) {
-        const retKey = `ret-${item.id}-${tag}`;
-        recordsMap.set(retKey, {
-          id: retKey,
-          rfidTag: tag,
-          timestamp: item.returnedAt || item.updatedAt || new Date().toISOString(),
-          eventType: 'ITEM_RETURNED',
-          itemName: item.name,
-          category: item.category,
-          location: item.foundLocation,
-          guestName: item.guestName,
-          status: 'RETURNED',
-          operator: item.foundBy || 'Staff'
-        });
-      }
-    });
-
     const recordsList = Array.from(recordsMap.values()).map((rec) => {
-      if (!rec.itemName) {
-        const matchedItem = items.find((it) => (it.rfidTag || it.id || '').trim().toLowerCase() === rec.rfidTag.toLowerCase());
-        if (matchedItem) {
-          return {
-            ...rec,
-            itemName: matchedItem.name,
-            category: matchedItem.category,
-            location: matchedItem.foundLocation,
-            guestName: matchedItem.guestName,
-            status: rec.status === 'DETECTED' ? matchedItem.status : rec.status
-          };
-        }
+      const recTagClean = (rec.rfidTag || '').replace(/\s+/g, '').toUpperCase();
+      const matchedItem = items.find((it) => {
+        const itTagClean = (it.rfidTag || it.id || '').replace(/\s+/g, '').toUpperCase();
+        return itTagClean === recTagClean;
+      });
+
+      if (matchedItem) {
+        return {
+          ...rec,
+          itemName: matchedItem.name,
+          category: matchedItem.category,
+          location: matchedItem.foundLocation,
+          guestName: matchedItem.guestName,
+          status: rec.status === 'DETECTED' ? (matchedItem.status || 'STORED') : rec.status
+        };
       }
       return rec;
     });
@@ -609,6 +618,17 @@ export default function App() {
       return (item.status || 'STORED') === itemFilter;
     });
   }, [items, searchTerm, itemFilter]);
+
+  // Detected Item for the Live Scanner UI
+  const scannerMatchedItem = useMemo(() => {
+    const rawTag = scannerInputTag.trim();
+    if (!rawTag) return null;
+    const cleanTag = rawTag.replace(/\s+/g, '').toUpperCase();
+    return items.find((it) => {
+      const itTagClean = (it.rfidTag || it.id || '').replace(/\s+/g, '').toUpperCase();
+      return itTagClean === cleanTag;
+    }) || null;
+  }, [scannerInputTag, items]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -668,9 +688,7 @@ export default function App() {
 
   const handleSaveItem = async (e) => {
     e.preventDefault();
-    if (!formData.name.trim()) {
-      return;
-    }
+    if (!formData.name.trim()) return;
 
     const tagToSave = (formData.rfidTag || `LF-${Date.now().toString().slice(-6)}`).trim();
     const nowIso = new Date().toISOString();
@@ -758,7 +776,6 @@ export default function App() {
     }
   };
 
-  // Open the Yes/No Confirmation Dialog
   const openConfirmModal = (actionType, targetId = null) => {
     let title = '';
     let description = '';
@@ -786,13 +803,16 @@ export default function App() {
     });
   };
 
-  // Execute action upon clicking "Yes"
   const handleExecuteConfirmedAction = async () => {
     try {
       if (confirmModal.actionType === 'EMPTY_ITEMS') {
         await remove(ref(database, 'items'));
       } else if (confirmModal.actionType === 'CLEAR_HISTORY') {
         await remove(ref(database, 'scan_history'));
+        await set(ref(database, 'current_scan'), { uid: '', status: 'IDLE', timestamp: '' });
+        setScanHistory([]);
+        setCurrentScan({ uid: '', status: 'IDLE', timestamp: '' });
+        setScannerInputTag('');
       } else if (confirmModal.actionType === 'DELETE_SINGLE_ITEM' && confirmModal.targetId) {
         await remove(ref(database, `items/${confirmModal.targetId}`));
       } else if (confirmModal.actionType === 'DELETE_STAFF' && confirmModal.targetId) {
@@ -800,7 +820,6 @@ export default function App() {
         const targetUser = staffUsers.find((u) => u.id === targetUserId);
         const userPassword = targetUser?.assignedPassword || targetUser?.password;
 
-        // Automatically delete from Firebase Authentication via isolated secondary app
         if (targetUser?.email && userPassword) {
           let secondaryApp = null;
           try {
@@ -828,11 +847,10 @@ export default function App() {
           }
         }
 
-        // Delete user from Realtime Database
         await remove(ref(database, `users/${targetUserId}`));
       }
     } catch (err) {
-      // Execution error handled
+      // Execution error
     } finally {
       setConfirmModal({
         isOpen: false,
@@ -1181,6 +1199,25 @@ export default function App() {
             <span>Dashboard</span>
           </button>
 
+          {/* Dedicated Live Tag Scanner Menu Tab */}
+          <button
+            onClick={() => {
+              setActiveTab('live-scanner');
+              setMobileMenuOpen(false);
+            }}
+            className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition ${
+              activeTab === 'live-scanner'
+                ? 'bg-emerald-600 text-white shadow-md shadow-emerald-950/40'
+                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <Scan size={17} className={activeTab === 'live-scanner' ? 'text-white' : 'text-emerald-400'} />
+              <span>Live Tag Scanner</span>
+            </div>
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          </button>
+
           <div>
             <button
               onClick={() => setItemsMenuOpen(!itemsMenuOpen)}
@@ -1454,6 +1491,240 @@ export default function App() {
         </header>
 
         <main className="flex-1 overflow-y-auto p-4 sm:p-6 md:p-8 bg-slate-50/70">
+          {/* TAB: LIVE TAG SCANNER (Exact UI from your provided image) */}
+          {activeTab === 'live-scanner' && (
+            <div className="max-w-5xl mx-auto space-y-6">
+              <div className="bg-white border border-slate-200/80 rounded-3xl p-6 md:p-8 shadow-sm">
+                <div>
+                  <label className="block text-sm font-bold text-slate-800 mb-2">
+                    RFID Tag ID *
+                  </label>
+                  
+                  {/* Identical Rounded Pill Input and Button Layout */}
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                    <div className="relative flex-1">
+                      <input
+                        type="text"
+                        placeholder="Scan or enter RFID tag ID"
+                        value={scannerInputTag}
+                        onChange={(e) => setScannerInputTag(e.target.value)}
+                        className={`w-full px-5 py-3.5 bg-white border-2 rounded-2xl text-sm font-mono font-bold transition focus:outline-none ${
+                          scannerSuccessCue
+                            ? 'border-emerald-500 ring-4 ring-emerald-100 bg-emerald-50/30 text-emerald-900'
+                            : isScannerAwaiting
+                            ? 'border-emerald-400 bg-emerald-50/20 text-slate-800'
+                            : 'border-emerald-600 text-slate-900 focus:border-emerald-700'
+                        }`}
+                      />
+                      {scannerInputTag && (
+                        <button
+                          type="button"
+                          onClick={() => setScannerInputTag('')}
+                          className="absolute right-4 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-700 rounded-lg"
+                        >
+                          <X size={16} />
+                        </button>
+                      )}
+                    </div>
+
+                    {isScannerAwaiting ? (
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          disabled
+                          className="px-6 py-3.5 bg-emerald-600 text-white rounded-2xl text-sm font-bold transition flex items-center justify-center gap-2 animate-pulse shadow-md shadow-emerald-700/30 shrink-0"
+                        >
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          <span>Tap Card on Reader Now...</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleCancelScannerTabScan}
+                          className="px-4 py-3.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl text-sm font-semibold transition shrink-0"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handleStartScannerTabScan}
+                        className="px-6 py-3.5 border-2 border-emerald-600 text-emerald-700 hover:bg-emerald-50 active:bg-emerald-100 rounded-2xl text-sm font-bold transition flex items-center justify-center gap-2 shrink-0 shadow-sm"
+                      >
+                        <Scan size={18} />
+                        <span>Scan RFID Tag</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {isScannerAwaiting && (
+                    <div className="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center gap-2.5 text-xs text-emerald-800">
+                      <Radio size={16} className="text-emerald-600 animate-pulse shrink-0" />
+                      <p>
+                        <strong>Listening to ESP32:</strong> Please hold the physical RFID card or keychain against the RC522 terminal now.
+                      </p>
+                    </div>
+                  )}
+
+                  {scannerSuccessCue && (
+                    <div className="mt-3 p-3 bg-emerald-500 text-white rounded-xl flex items-center gap-2 text-xs font-semibold animate-in fade-in">
+                      <CheckCircle2 size={16} className="shrink-0" />
+                      <span>RFID Card captured: {scannerInputTag}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Display Match Results or Unassigned Status */}
+                <div className="mt-8 pt-6 border-t border-slate-100">
+                  {scannerInputTag ? (
+                    scannerMatchedItem ? (
+                      <div className="bg-slate-50 border border-slate-200/90 rounded-2xl p-6 sm:p-7">
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-5 border-b border-slate-200">
+                          <div>
+                            <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 inline-flex items-center gap-1.5">
+                              <CheckCircle2 size={14} />
+                              Item Identified in Inventory
+                            </span>
+                            <h3 className="text-2xl font-black text-slate-900 mt-2">{scannerMatchedItem.name}</h3>
+                            <p className="text-xs text-slate-500 mt-0.5">
+                              Tag UID: <span className="font-mono font-bold text-emerald-700">{scannerMatchedItem.rfidTag}</span>
+                            </p>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            {scannerMatchedItem.status !== 'RETURNED' && (
+                              <button
+                                onClick={() => handleUpdateItemStatus(scannerMatchedItem, 'RETURNED')}
+                                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-sm"
+                              >
+                                Mark as Returned
+                              </button>
+                            )}
+                            <button
+                              onClick={() => {
+                                setEditingItem(scannerMatchedItem);
+                                setIsEditModalOpen(true);
+                              }}
+                              className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5"
+                            >
+                              <Edit2 size={13} />
+                              <span>Edit Item</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
+                          <div className="flex flex-col items-center justify-center p-4 bg-white border border-slate-200 rounded-2xl">
+                            {scannerMatchedItem.photo ? (
+                              <img
+                                src={scannerMatchedItem.photo}
+                                alt={scannerMatchedItem.name}
+                                onClick={() => setViewPhotoModalUrl({ url: scannerMatchedItem.photo, title: scannerMatchedItem.name })}
+                                className="w-44 h-44 object-cover rounded-2xl border border-slate-200 cursor-pointer shadow-sm hover:scale-105 transition"
+                              />
+                            ) : (
+                              <div className="w-32 h-32 rounded-2xl bg-slate-100 flex flex-col items-center justify-center text-slate-400">
+                                <ImageIcon size={36} />
+                                <span className="text-[10px] mt-1 font-semibold">No Photo</span>
+                              </div>
+                            )}
+                            <span className="text-[11px] text-slate-400 mt-2.5">Click photo to view larger</span>
+                          </div>
+
+                          <div className="space-y-3 text-xs md:col-span-2">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                              <div className="p-3 bg-white rounded-xl border border-slate-200/80">
+                                <p className="text-[10px] uppercase font-bold text-slate-400">Category</p>
+                                <p className="text-sm font-bold text-slate-800 mt-0.5">{scannerMatchedItem.category}</p>
+                              </div>
+
+                              <div className="p-3 bg-white rounded-xl border border-slate-200/80">
+                                <p className="text-[10px] uppercase font-bold text-slate-400">Status</p>
+                                <span
+                                  className={`mt-1 inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                                    scannerMatchedItem.status === 'RETURNED'
+                                      ? 'bg-blue-100 text-blue-700'
+                                      : scannerMatchedItem.status === 'UNCLAIMED'
+                                      ? 'bg-rose-100 text-rose-700'
+                                      : 'bg-emerald-100 text-emerald-700'
+                                  }`}
+                                >
+                                  {scannerMatchedItem.status || 'STORED'}
+                                </span>
+                              </div>
+
+                              <div className="p-3 bg-white rounded-xl border border-slate-200/80">
+                                <p className="text-[10px] uppercase font-bold text-slate-400">Found Location</p>
+                                <p className="text-xs font-semibold text-slate-700 mt-0.5 flex items-center gap-1">
+                                  <MapPin size={13} className="text-emerald-600" />
+                                  {scannerMatchedItem.foundLocation || 'Hotel Premises'}
+                                </p>
+                              </div>
+
+                              <div className="p-3 bg-white rounded-xl border border-slate-200/80">
+                                <p className="text-[10px] uppercase font-bold text-slate-400">Found Date &amp; Time</p>
+                                <p className="text-xs font-semibold text-slate-700 mt-0.5 font-mono">
+                                  {scannerMatchedItem.dateFound || '—'} {scannerMatchedItem.timeFound || ''}
+                                </p>
+                              </div>
+
+                              <div className="p-3 bg-white rounded-xl border border-slate-200/80">
+                                <p className="text-[10px] uppercase font-bold text-slate-400">Guest Name / Room</p>
+                                <p className="text-xs font-semibold text-slate-700 mt-0.5">
+                                  {scannerMatchedItem.guestName ? `${scannerMatchedItem.guestName} (Room ${scannerMatchedItem.roomNumber || '—'})` : 'No Guest Stated'}
+                                </p>
+                              </div>
+
+                              <div className="p-3 bg-white rounded-xl border border-slate-200/80">
+                                <p className="text-[10px] uppercase font-bold text-slate-400">Logged By</p>
+                                <p className="text-xs font-semibold text-slate-700 mt-0.5">
+                                  {scannerMatchedItem.foundBy || 'Front Desk Staff'}
+                                </p>
+                              </div>
+                            </div>
+
+                            {scannerMatchedItem.description && (
+                              <div className="p-3.5 bg-white rounded-xl border border-slate-200/80">
+                                <p className="text-[10px] uppercase font-bold text-slate-400">Description</p>
+                                <p className="text-xs text-slate-700 mt-1 leading-relaxed">{scannerMatchedItem.description}</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="bg-amber-50/50 border border-amber-200 rounded-2xl p-6 text-center">
+                        <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center mx-auto mb-2.5">
+                          <Tag size={24} />
+                        </div>
+                        <h4 className="text-base font-bold text-slate-900">Unregistered RFID Tag Detected</h4>
+                        <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1">
+                          Tag UID <strong className="font-mono text-slate-800">{scannerInputTag}</strong> is not associated with any recorded lost item in the system.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFormData((prev) => ({ ...prev, rfidTag: scannerInputTag }));
+                            setActiveTab('add-item');
+                          }}
+                          className="mt-4 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition inline-flex items-center gap-1.5 shadow-sm"
+                        >
+                          <PlusCircle size={14} />
+                          <span>Register New Item with this Tag</span>
+                        </button>
+                      </div>
+                    )
+                  ) : (
+                    <div className="text-center py-10 text-slate-400">
+                      <Scan size={32} className="mx-auto mb-2 text-slate-300" />
+                      <p className="text-xs font-medium">Ready for RFID scan. Tap card on reader or type UID above.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* TAB: DASHBOARD */}
           {activeTab === 'dashboard' && (
             <div className="max-w-6xl mx-auto space-y-6">
@@ -2437,7 +2708,7 @@ export default function App() {
                   <div>
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">TOTAL SCANS LOGGED</p>
                     <p className="text-2xl font-extrabold text-slate-900 mt-1">{unifiedScanRecords.length}</p>
-                    <p className="text-[11px] text-slate-400 mt-0.5">Recorded hardware &amp; item scans</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">Recorded unique activity events</p>
                   </div>
                   <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100">
                     <Scan size={20} />
@@ -3648,7 +3919,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Yes/No Double Confirmation Dialog */}
+      {/* Confirmation Dialog */}
       {confirmModal.isOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 text-center animate-in fade-in zoom-in-95 duration-150">
